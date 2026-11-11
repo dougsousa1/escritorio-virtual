@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Escritório Virtual</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Tela de entrada -->
+  <div id="login" class="overlay">
+    <form id="loginForm" class="card login-card">
+      <div class="logo">🏢</div>
+      <h1>Escritório Virtual</h1>
+      <p class="muted">Entre, sente no seu setor e puxe quem precisar pra uma reunião rápida.</p>
+
+      <label>Seu nome
+        <input id="nameInput" maxlength="24" placeholder="Ex.: Douglas" required autocomplete="off" />
+      </label>
+
+      <label>Cor da camisa</label>
+      <div id="colorPicker" class="swatches"></div>
+
+      <label>Tom de pele</label>
+      <div id="skinPicker" class="swatches"></div>
+
+      <label>Em qual setor você está trabalhando?</label>
+      <div id="sectorPicker" class="chips"></div>
+
+      <button type="submit" class="btn primary big">Entrar no escritório →</button>
+    </form>
+  </div>
+
+  <div id="app" class="hidden">
+    <main id="stage">
+      <div id="callBar" class="hidden">
+        <div id="videos"></div>
+        <div class="call-controls">
+          <span id="callRoom" class="pill">Reunião</span>
+          <button id="micBtn" class="btn round" title="Microfone">🎙️</button>
+          <button id="camBtn" class="btn round" title="Câmera">📷</button>
+          <button id="leaveBtn" class="btn danger">Sair da reunião</button>
+        </div>
+      </div>
+      <canvas id="canvas"></canvas>
+      <div id="hud">
+        <span id="whereAmI" class="pill">📍 —</span>
+        <span class="pill hint">WASD ou clique pra andar · Enter chat</span>
+      </div>
+      <div id="emoteBar">
+        <button data-e="👋">👋</button><button data-e="❤️">❤️</button><button data-e="😂">😂</button>
+        <button data-e="👍">👍</button><button data-e="🎉">🎉</button><button data-e="☕">☕</button>
+      </div>
+      <div id="ctxMenu" class="card hidden"></div>
+    </main>
+
+    <aside id="sidebar">
+      <div class="me-box">
+        <div id="meAvatar" class="mini-avatar"></div>
+        <div class="me-info">
+          <strong id="meName">—</strong>
+          <select id="statusSelect">
+            <option value="disponivel">🟢 Disponível</option>
+            <option value="ocupado">🔴 Ocupado / foco</option>
+            <option value="ausente">🟡 Ausente</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="section-title">Pessoas <span id="onlineCount" class="badge">0</span></div>
+      <div id="people"></div>
+
+      <div class="section-title">Ir para</div>
+      <div id="goto" class="chips small"></div>
+
+      <div class="section-title">Chat</div>
+      <div id="chatLog"></div>
+      <form id="chatForm">
+        <input id="chatInput" maxlength="280" placeholder="Mensagem para todos..." autocomplete="off" />
+      </form>
+    </aside>
+  </div>
+
+  <div id="invite" class="overlay hidden">
+    <div class="card invite-card">
+      <div class="ring">📞</div>
+      <h2 id="inviteTitle">Convite</h2>
+      <p id="inviteText" class="muted"></p>
+      <div class="progress"><div id="inviteProgress"></div></div>
+      <div class="row">
+        <button id="declineBtn" class="btn">Agora não</button>
+        <button id="acceptBtn" class="btn primary">Entrar na reunião</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

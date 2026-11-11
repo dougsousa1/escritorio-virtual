@@ -1,0 +1,16 @@
+{
+  "name": "escritorio-virtual",
+  "version": "1.0.0",
+  "description": "Escritório virtual animado: cada pessoa no seu setor, reuniões rápidas com vídeo.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

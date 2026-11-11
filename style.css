@@ -1,0 +1,129 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #1d2030;
+  --panel: #262a3d;
+  --panel2: #2f3449;
+  --line: #3a4060;
+  --text: #eef0f8;
+  --muted: #a3a9c4;
+  --accent: #5b8cff;
+  --danger: #ef5b6b;
+  --ok: #3ccf7a;
+  --warn: #f5c04a;
+}
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px; overflow: hidden; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+
+/* ---------- Botões / básicos ---------- */
+.btn { border: 1px solid var(--line); background: var(--panel2); color: var(--text); padding: 8px 14px;
+  border-radius: 10px; cursor: pointer; font: inherit; transition: transform .12s, background .15s; }
+.btn:hover { background: #3a4060; }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover { background: #4a7bf0; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+.btn.big { width: 100%; padding: 13px; font-size: 15px; margin-top: 18px; }
+.btn.round { width: 40px; height: 40px; padding: 0; border-radius: 50%; font-size: 17px; }
+.btn.round.off { background: var(--danger); border-color: var(--danger); }
+.pill { background: rgba(20,22,34,.82); color: var(--text); padding: 6px 12px; border-radius: 999px; font-size: 13px;
+  backdrop-filter: blur(6px); }
+.pill.hint { color: var(--muted); }
+.badge { background: var(--accent); color: #fff; border-radius: 999px; padding: 1px 8px; font-size: 12px; margin-left: 6px; }
+input, select { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 9px 12px; outline: none; }
+input:focus, select:focus { border-color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+
+/* ---------- Login ---------- */
+.overlay { position: fixed; inset: 0; display: grid; place-items: center; z-index: 50;
+  background: radial-gradient(circle at 30% 20%, #2c3560, #151726 70%); }
+#invite.overlay { background: rgba(10,12,20,.55); backdrop-filter: blur(3px); }
+.login-card { width: min(460px, 92vw); padding: 30px; animation: pop .35s ease-out; }
+.login-card h1 { margin: 6px 0 4px; font-size: 24px; }
+.login-card label { display: block; margin: 16px 0 8px; font-weight: 600; font-size: 13px; color: var(--muted); }
+.login-card input { width: 100%; margin-top: 8px; }
+.logo { font-size: 44px; animation: float 3s ease-in-out infinite; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; transition: transform .12s; }
+.swatch:hover { transform: scale(1.12); }
+.swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { padding: 7px 12px; border-radius: 999px; background: var(--panel2); border: 1px solid var(--line); cursor: pointer;
+  font-size: 13px; user-select: none; transition: background .15s; }
+.chip:hover { background: #3a4060; }
+.chip.sel { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chips.small .chip { padding: 5px 10px; font-size: 12px; }
+
+/* ---------- Layout ---------- */
+#app { display: flex; height: 100vh; }
+#stage { position: relative; flex: 1; min-width: 0; background: #151726; }
+#canvas { width: 100%; height: 100%; display: block; cursor: pointer; }
+#hud { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none; }
+#emoteBar { position: absolute; right: 14px; bottom: 14px; display: flex; gap: 4px; background: rgba(20,22,34,.82);
+  padding: 5px; border-radius: 999px; }
+#emoteBar button { background: none; border: 0; font-size: 20px; cursor: pointer; border-radius: 50%; width: 36px; height: 36px;
+  transition: transform .12s, background .12s; }
+#emoteBar button:hover { transform: translateY(-3px) scale(1.15); background: rgba(255,255,255,.08); }
+
+#sidebar { width: 310px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+  padding: 14px; gap: 6px; overflow: hidden; }
+.me-box { display: flex; gap: 12px; align-items: center; padding: 10px; background: var(--panel2); border-radius: 14px; }
+.me-info { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.me-info select { padding: 5px 8px; font-size: 13px; }
+.mini-avatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; position: relative; overflow: hidden; }
+.section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 10px 2px 2px; font-weight: 700; }
+#people { overflow-y: auto; max-height: 38vh; display: flex; flex-direction: column; gap: 4px; padding-right: 2px; }
+.group-title { font-size: 12px; color: var(--muted); margin: 6px 4px 2px; display: flex; justify-content: space-between; }
+.person { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; transition: background .12s; }
+.person:hover { background: var(--panel2); }
+.person .dot { width: 26px; height: 26px; border-radius: 50%; position: relative; flex-shrink: 0; }
+.person .dot i { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--panel); }
+.person .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person .acts { display: flex; gap: 4px; opacity: 0; transition: opacity .12s; }
+.person:hover .acts { opacity: 1; }
+.person .acts button { border: 0; background: var(--panel); color: var(--text); border-radius: 8px; padding: 4px 7px; cursor: pointer; font-size: 13px; }
+.person .acts button.pull { background: var(--accent); }
+.st-disponivel { background: var(--ok); } .st-ocupado { background: var(--danger); } .st-ausente { background: var(--warn); }
+
+#chatLog { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; font-size: 13px; }
+.msg b { color: #c9d4ff; } .msg .z { color: var(--muted); font-size: 11px; }
+#chatInput { width: 100%; }
+
+/* ---------- Chamada ---------- */
+#callBar { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column;
+  align-items: center; gap: 8px; animation: drop .3s ease-out; pointer-events: none; }
+#callBar > * { pointer-events: auto; }
+#videos { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.tile { position: relative; width: 160px; height: 104px; border-radius: 14px; overflow: hidden; background: #0f1120;
+  border: 2px solid var(--line); box-shadow: 0 8px 24px rgba(0,0,0,.4); animation: pop .25s ease-out; }
+.tile video { width: 100%; height: 100%; object-fit: cover; }
+.tile.me video { transform: scaleX(-1); }
+.tile .label { position: absolute; left: 8px; bottom: 6px; font-size: 12px; background: rgba(0,0,0,.55); padding: 2px 8px; border-radius: 999px; }
+.tile .noCam { position: absolute; inset: 0; display: grid; place-items: center; font-size: 30px; font-weight: 700; color: #fff; }
+.tile.speaking { border-color: var(--ok); }
+.call-controls { display: flex; gap: 8px; align-items: center; background: rgba(20,22,34,.88); padding: 6px 8px; border-radius: 999px; }
+
+/* ---------- Menu de contexto / convite / toasts ---------- */
+#ctxMenu { position: absolute; z-index: 10; padding: 6px; min-width: 190px; animation: pop .15s ease-out; }
+#ctxMenu .hdr { padding: 6px 10px; font-weight: 700; }
+#ctxMenu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 8px 10px;
+  border-radius: 8px; cursor: pointer; font: inherit; }
+#ctxMenu button:hover { background: var(--panel2); }
+.invite-card { width: min(380px, 90vw); padding: 26px; text-align: center; animation: pop .3s ease-out; }
+.invite-card .row { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+.ring { font-size: 42px; display: inline-block; animation: shake .5s ease-in-out infinite; }
+.progress { height: 5px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin-top: 12px; }
+#inviteProgress { height: 100%; background: var(--accent); width: 100%; }
+#toasts { position: fixed; bottom: 70px; right: 326px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+.toast { background: var(--panel2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 12px; animation: slide .25s ease-out;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4); max-width: 320px; }
+
+@keyframes pop { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes drop { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@keyframes slide { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+@keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (max-width: 800px) { #sidebar { display: none; } #toasts { right: 16px; } }
