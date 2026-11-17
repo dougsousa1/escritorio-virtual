@@ -400,9 +400,9 @@
   function loop(t) {
     const dt = Math.min(0.05, (t - lastT) / 1000);
     lastT = t;
+    requestAnimationFrame(loop); // agenda antes: um erro num quadro não para a animação
     update(dt, t);
     draw(t);
-    requestAnimationFrame(loop);
   }
 
   function update(dt, t) {
@@ -495,6 +495,8 @@
     bakeStatic();
   }
   window.addEventListener('resize', resize);
+  // A tela pode começar com tamanho 0 (escondida no login): refaz quando ganhar tamanho.
+  if (window.ResizeObserver) new ResizeObserver(() => { if (meId) resize(); }).observe(canvas);
   if (document.fonts) document.fonts.ready.then(() => { if (meId) resize(); });
 
   function rr(c, x, y, w, h) { c.beginPath(); c.rect(x, y, w, h); }
@@ -850,7 +852,7 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#151726';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (staticLayer) ctx.drawImage(staticLayer, ox * dpr, oy * dpr);
+    if (staticLayer && staticLayer.width && staticLayer.height) ctx.drawImage(staticLayer, ox * dpr, oy * dpr);
     ctx.setTransform(scale * dpr, 0, 0, scale * dpr, ox * dpr, oy * dpr);
     ctx.imageSmoothingEnabled = false;
 

@@ -85,7 +85,7 @@ app.post('/api/agent', (req, res) => {
   }
   if (b.name) a.name = clean(b.name, 24) || a.name;
   a.state = state;
-  a.tool = event === 'PreToolUse' ? clean(b.tool, 32) || null : state === 'working' ? a.tool : null;
+  a.tool = event === 'PreToolUse' ? clean(String(b.tool || '').split('__').pop(), 32) || null : state === 'working' ? a.tool : null;
   a.seen = Date.now();
   placeAgent(a);
   io.emit('agent-update', { ...publicAgent(a), event });
