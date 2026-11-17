@@ -69,6 +69,20 @@
   const ctx = canvas.getContext('2d');
   let view = { scale: 1, ox: 0, oy: 0, dpr: 1 };
 
+  // Agentes de IA (sessões do Claude Code)
+  const agents = new Map();
+  const AGENT_SPEED = 120;
+  const TOOL_ICON = { Edit: '✏️', MultiEdit: '✏️', Write: '📝', Read: '📖', Bash: '⌨️', Grep: '🔎', Glob: '🔎', WebFetch: '🌐', WebSearch: '🌐', Task: '🧩', Agent: '🧩', TodoWrite: '✅' };
+  const AGENT_STATE = { working: 'Trabalhando', waiting: 'Precisa de você', idle: 'Parado' };
+  function upsertAgent(a) {
+    const cur = agents.get(a.id);
+    if (cur) { Object.assign(cur, a); return cur; }
+    const n = { ...a, rx: a.x, ry: a.y, phase: (hash(a.id) % 100) / 10, bubble: null };
+    agents.set(a.id, n);
+    poof(a.x, a.y);
+    return n;
+  }
+
   function addUser(u) {
     const h = hash(u.name + u.id);
     users.set(u.id, { ...u, rx: u.x, ry: u.y, phase: (h % 100) / 10, hair: HAIRS[h % HAIRS.length], bubble: null });
@@ -88,11 +102,13 @@
   });
   socket.on('disconnect', () => { if (meId) toast('Conexão perdida — reconectando...'); });
 
-  socket.on('init', ({ me, users: list }) => {
+  socket.on('init', ({ me, users: list, agents: agentList = [] }) => {
     meId = me.id;
     myTp = 0;
     users.clear();
     list.forEach(addUser);
+    agents.clear();
+    agentList.forEach(upsertAgent);
     $('meName').textContent = me.name;
     $('whereAmI').textContent = `📍 ${zoneName(me.zone)}`;
     paintMini($('meAvatar'), me.color, me.skin);
@@ -157,6 +173,23 @@
     if (u) effects.push({ kind: 'emoji', id, emoji, t0: performance.now(), dx: (Math.random() - 0.5) * 16 });
   });
   socket.on('toast', (t) => toast(t));
+
+  socket.on('agent-update', (a) => {
+    const isNew = !agents.has(a.id);
+    const ag = upsertAgent(a);
+    const now = performance.now();
+    if (a.event === 'Stop') ag.bubble = { text: '✅ Terminei!', until: now + 5000 };
+    else if (a.event === 'UserPromptSubmit') ag.bubble = { text: '🫡 Bora!', until: now + 2500 };
+    else if (isNew) ag.bubble = { text: '👋 Cheguei', until: now + 3000 };
+    if (a.event === 'Notification') toast(`🤖 ${a.name} (${a.owner}) precisa de atenção`);
+    renderPeople();
+  });
+  socket.on('agent-left', ({ id }) => {
+    const a = agents.get(id);
+    if (a) poof(a.rx, a.ry);
+    agents.delete(id);
+    renderPeople();
+  });
 
   // ---------------------------------------------------------------- Convites
   let currentInvite = null;
@@ -236,6 +269,19 @@
           </div>`;
         }
       }
+      if (agents.size) {
+        html += `<div class="group-title"><span>🤖 Agentes de IA</span><span>${agents.size}</span></div>`;
+        const order = { waiting: 0, working: 1, idle: 2 };
+        for (const a of [...agents.values()].sort((x, y) => order[x.state] - order[y.state] || x.name.localeCompare(y.name))) {
+          const detail = a.state === 'working' && a.tool ? `${AGENT_STATE.working} · ${a.tool}` : AGENT_STATE[a.state];
+          html += `<div class="person agent ag-${a.state}" data-agent="${esc(a.id)}">
+            <div class="dot bot" style="background:${a.color}"><i class="st-ag-${a.state}"></i></div>
+            <div class="nm">${esc(a.name)} <span class="muted">· ${esc(a.owner)}</span>
+              <div class="muted" style="font-size:11px">${esc(detail)}</div></div>
+            <div class="acts"><button data-act="walk-agent" title="Ir até">📍</button></div>
+          </div>`;
+        }
+      }
       $('people').innerHTML = html;
       $('onlineCount').textContent = users.size;
     }, 30);
@@ -244,6 +290,11 @@
     const btn = e.target.closest('button');
     const row = e.target.closest('.person');
     if (!btn || !row) return;
+    if (btn.dataset.act === 'walk-agent') {
+      const a = agents.get(row.dataset.agent);
+      if (a) target = { x: a.x + 26, y: a.y };
+      return;
+    }
     personAction(btn.dataset.act, row.dataset.id);
   };
   function personAction(act, id) {
@@ -386,6 +437,22 @@
       lastSent = t;
       lastSentState = state;
       socket.emit('move', { x: me.x, y: me.y, dir: me.dir, moving: me.moving, tp: myTp });
+    }
+
+    for (const a of agents.values()) {
+      const dx = a.x - a.rx;
+      const dy = a.y - a.ry;
+      const d = Math.hypot(dx, dy);
+      a.walking = d > 1;
+      if (a.walking) {
+        const step = Math.min(d, AGENT_SPEED * dt);
+        a.rx += (dx / d) * step;
+        a.ry += (dy / d) * step;
+        a.wdir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
+      } else {
+        a.rx = a.x;
+        a.ry = a.y;
+      }
     }
 
     for (const u of users.values()) {
@@ -649,8 +716,8 @@
     }
 
     // Avatares ordenados por profundidade
-    const list = [...users.values()].sort((a, b) => a.ry - b.ry);
-    for (const u of list) drawAvatar(u, t);
+    const list = [...users.values(), ...agents.values()].sort((a, b) => a.ry - b.ry);
+    for (const u of list) (agents.has(u.id) ? drawAgent(u, t) : drawAvatar(u, t));
     for (const u of list) drawBubble(u, t);
 
     // Emojis flutuando
@@ -742,6 +809,93 @@
       ctx.fillText('z', x + 20, hy - 20 - ((t / 40 + u.phase * 10) % 8));
     }
     ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+  }
+
+  // Robozinho: cabeça-monitor com antena. Digita quando trabalha, "!" quando espera.
+  function drawAgent(a, t) {
+    const x = a.rx;
+    const y = a.ry;
+    const dir = a.walking ? a.wdir : a.dir;
+    const walk = a.walking ? Math.sin(t / 80 + a.phase) : 0;
+    const working = a.state === 'working' && !a.walking;
+    const waiting = a.state === 'waiting' && !a.walking;
+    const bob = a.walking ? Math.abs(walk) * -2 : Math.sin(t / 500 + a.phase) * 1;
+
+    ctx.fillStyle = 'rgba(0,0,0,.22)';
+    ctx.beginPath(); ctx.ellipse(x, y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#4a5068';
+    rr(ctx, x - 6, y - 8 + walk * 2, 4, 8 - walk * 2, 1.5); ctx.fill();
+    rr(ctx, x + 2, y - 8 - walk * 2, 4, 8 + walk * 2, 1.5); ctx.fill();
+    const by = y - 22 + bob;
+    ctx.fillStyle = '#c9cfdc';
+    rr(ctx, x - 9, by, 18, 15, 4); ctx.fill();
+    ctx.fillStyle = a.color;
+    rr(ctx, x - 9, by + 6, 18, 4, 1); ctx.fill();
+    const tap = working ? Math.sin(t / 55 + a.phase) * 2 : 0;
+    ctx.fillStyle = '#9aa2b6';
+    rr(ctx, x - 12, by + 2 + (working ? tap : -walk * 2), 3.5, 10, 1.5); ctx.fill();
+    rr(ctx, x + 8.5, by + 2 + (working ? -tap : walk * 2), 3.5, 10, 1.5); ctx.fill();
+    const hy = by - 16;
+    ctx.fillStyle = '#dfe4ee';
+    rr(ctx, x - 10, hy, 20, 15, 4); ctx.fill();
+    ctx.strokeStyle = '#9aa2b6';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, hy); ctx.lineTo(x, hy - 5); ctx.stroke();
+    const led = a.state === 'working' ? '#3ccf7a' : a.state === 'waiting' ? '#f5c04a' : '#8b93a8';
+    ctx.fillStyle = led;
+    ctx.globalAlpha = a.state === 'working' ? 0.6 + Math.sin(t / 120) * 0.4 : 1;
+    ctx.beginPath(); ctx.arc(x, hy - 6, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (dir !== 'up') {
+      ctx.fillStyle = '#1d2236';
+      rr(ctx, x - 7.5, hy + 2.5, 15, 10, 2.5); ctx.fill();
+      ctx.fillStyle = a.state === 'idle' ? '#7f8bb0' : '#7df0c2';
+      const ex = dir === 'left' ? -2 : dir === 'right' ? 2 : 0;
+      if (a.state === 'idle' && !a.walking) {
+        ctx.fillRect(x - 4.5 + ex, hy + 7, 3, 1.2);
+        ctx.fillRect(x + 1.5 + ex, hy + 7, 3, 1.2);
+      } else {
+        const blink = (t / 1000 + a.phase) % 3.5 < 0.1;
+        for (const s of [-3, 3]) {
+          if (blink) ctx.fillRect(x + s + ex - 1.5, hy + 7, 3, 1);
+          else ctx.fillRect(x + s + ex - 1.2, hy + 5.5, 2.4, 3.2);
+        }
+      }
+    }
+    const label = `🤖 ${a.name}`;
+    ctx.font = '600 10px system-ui, sans-serif';
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(29,32,48,.82)';
+    rr(ctx, x - tw / 2, y + 5, tw, 15, 7.5); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x, y + 12.8);
+    if (working && a.tool && !(a.bubble && t < a.bubble.until)) {
+      const tag = `${TOOL_ICON[a.tool] || '⚙️'} ${a.tool}`;
+      ctx.font = '600 9.5px system-ui, sans-serif';
+      const w = ctx.measureText(tag).width + 10;
+      ctx.fillStyle = 'rgba(60,207,122,.92)';
+      rr(ctx, x - w / 2, hy - 24, w, 14, 7); ctx.fill();
+      ctx.fillStyle = '#0f2a1b';
+      ctx.fillText(tag, x, hy - 16.6);
+    }
+    if (waiting) {
+      const p = 1 + Math.sin(t / 180) * 0.12;
+      ctx.fillStyle = '#f5c04a';
+      ctx.beginPath(); ctx.arc(x, hy - 18, 8 * p, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2b2108';
+      ctx.font = '800 12px system-ui, sans-serif';
+      ctx.fillText('!', x, hy - 17.5);
+    }
+    if (a.state === 'idle' && !a.walking) {
+      ctx.globalAlpha = 0.5 + Math.sin(t / 500 + a.phase) * 0.4;
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.fillStyle = '#9aa7d6';
+      ctx.fillText('z', x + 13, hy - 4 - ((t / 40 + a.phase * 10) % 8));
+      ctx.globalAlpha = 1;
+    }
     ctx.textAlign = 'left';
   }
 

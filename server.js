@@ -14,6 +14,7 @@ const PUBLIC_FILES = { '/': 'index.html', '/index.html': 'index.html', '/app.js'
 for (const [route, file] of Object.entries(PUBLIC_FILES)) {
   app.get(route, (req, res) => res.sendFile(path.join(__dirname, file)));
 }
+app.use('/api/agent', express.json({ limit: '4kb' }));
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -23,6 +24,80 @@ const users = new Map();
 const invites = new Map();
 
 const STATUSES = ['disponivel', 'ocupado', 'ausente'];
+
+// ---------------------------------------------------------------- Agentes de IA (Claude Code via hooks)
+/** @type {Map<string, any>} agentId -> agente */
+const agents = new Map();
+const AGENT_KEY = process.env.AGENT_KEY || '';
+const MAX_AGENTS = 40;
+const AGENT_STALE_MS = 30 * 60 * 1000; // sem sinal há 30 min: some do mapa
+const AGENT_COLORS = ['#7aa2ff', '#ff8a7a', '#5fd39a', '#ffc15e', '#b48cff', '#4cc9d6', '#ff94cf'];
+
+function publicAgent(a) {
+  return { id: a.id, name: a.name, owner: a.owner, color: a.color, state: a.state, tool: a.tool, x: a.x, y: a.y, dir: a.dir };
+}
+
+// Trabalhando/esperando: senta numa mesa do Desenvolvimento. Parado: vai pro Descanso.
+function placeAgent(a) {
+  const zone = a.state === 'idle' ? 'descanso' : 'dev';
+  if (a.zone === zone) return;
+  const spot = freeSpot(zone, a.id);
+  a.zone = zone;
+  a.x = spot.x;
+  a.y = spot.y;
+  a.dir = spot.dir || 'down';
+}
+
+const EVENT_STATE = {
+  SessionStart: 'idle',
+  UserPromptSubmit: 'working',
+  PreToolUse: 'working',
+  PostToolUse: 'working',
+  Notification: 'waiting',
+  Stop: 'idle',
+};
+
+app.post('/api/agent', (req, res) => {
+  if (AGENT_KEY && req.get('x-office-key') !== AGENT_KEY) return res.status(401).json({ ok: false });
+  const b = req.body || {};
+  const id = 'ag-' + clean(b.id, 64).replace(/[^\w-]/g, '');
+  if (id === 'ag-') return res.status(400).json({ ok: false });
+  const event = String(b.event || '');
+
+  if (event === 'SessionEnd') {
+    if (agents.delete(id)) io.emit('agent-left', { id });
+    return res.json({ ok: true });
+  }
+  const state = EVENT_STATE[event];
+  if (!state) return res.json({ ok: true, ignored: true });
+
+  let a = agents.get(id);
+  if (!a) {
+    if (agents.size >= MAX_AGENTS) return res.status(429).json({ ok: false });
+    const owner = clean(b.owner, 24) || 'alguém';
+    a = {
+      id, owner,
+      name: clean(b.name, 24) || 'agente',
+      color: AGENT_COLORS[[...owner].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AGENT_COLORS.length],
+      state, tool: null, x: 0, y: 0, dir: 'down', zone: null,
+    };
+    agents.set(id, a);
+  }
+  if (b.name) a.name = clean(b.name, 24) || a.name;
+  a.state = state;
+  a.tool = event === 'PreToolUse' ? clean(b.tool, 32) || null : state === 'working' ? a.tool : null;
+  a.seen = Date.now();
+  placeAgent(a);
+  io.emit('agent-update', { ...publicAgent(a), event });
+  res.json({ ok: true });
+});
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, a] of agents) {
+    if (now - a.seen > AGENT_STALE_MS) { agents.delete(id); io.emit('agent-left', { id }); }
+  }
+}, 60 * 1000);
 
 function publicUser(u) {
   return {
@@ -40,7 +115,7 @@ const clampY = (v) => Math.max(8, Math.min(MAP.HEIGHT - 8, Number(v) || 0));
 
 function freeSpot(zoneId, exceptId) {
   const spots = MAP.seats[zoneId] || [];
-  const others = [...users.values()].filter((u) => u.id !== exceptId);
+  const others = [...users.values(), ...agents.values()].filter((u) => u.id !== exceptId);
   for (const s of spots) {
     if (!others.some((u) => Math.hypot(u.x - s.x, u.y - s.y) < 20)) return s;
   }
@@ -144,7 +219,7 @@ io.on('connection', (socket) => {
     };
     users.set(socket.id, u);
     u.zone = zoneIdAt(u.x, u.y);
-    socket.emit('init', { me: publicUser(u), users: [...users.values()].map(publicUser) });
+    socket.emit('init', { me: publicUser(u), users: [...users.values()].map(publicUser), agents: [...agents.values()].map(publicAgent) });
     socket.broadcast.emit('user-joined', publicUser(u));
   });
 

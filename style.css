@@ -127,3 +127,6 @@ input:focus, select:focus { border-color: var(--accent); }
 @keyframes shake { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (max-width: 800px) { #sidebar { display: none; } #toasts { right: 16px; } }
+.person .dot.bot { border-radius: 7px; }
+.st-ag-working { background: var(--ok); } .st-ag-waiting { background: var(--warn); } .st-ag-idle { background: #8b93a8; }
+.person.ag-waiting { box-shadow: inset 3px 0 0 var(--warn); }
