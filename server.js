@@ -15,6 +15,37 @@ for (const [route, file] of Object.entries(PUBLIC_FILES)) {
   app.get(route, (req, res) => res.sendFile(path.join(__dirname, file)));
 }
 app.use('/api/agent', express.json({ limit: '4kb' }));
+
+// Servidores ICE para as chamadas. Só STUN não basta quando a pessoa está atrás de NAT de operadora
+// (4G, alguns provedores): aí a câmera/áudio não chega. TURN repassa a mídia nesses casos.
+//   Cloudflare (grátis até 1 TB/mês): CF_TURN_KEY_ID + CF_TURN_API_TOKEN
+//   Outro TURN: TURN_URLS (separadas por vírgula) + TURN_USERNAME + TURN_CREDENTIAL
+const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+let iceCache = { at: 0, servers: null };
+app.get('/api/ice', async (req, res) => {
+  res.set('cache-control', 'no-store');
+  const { CF_TURN_KEY_ID, CF_TURN_API_TOKEN, TURN_URLS, TURN_USERNAME, TURN_CREDENTIAL } = process.env;
+  if (CF_TURN_KEY_ID && CF_TURN_API_TOKEN) {
+    if (iceCache.servers && Date.now() - iceCache.at < 6 * 3600 * 1000) return res.json({ iceServers: iceCache.servers, turn: true });
+    try {
+      const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${CF_TURN_KEY_ID}/credentials/generate-ice-servers`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${CF_TURN_API_TOKEN}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ ttl: 86400 }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data.iceServers) throw new Error('HTTP ' + r.status);
+      iceCache = { at: Date.now(), servers: [].concat(data.iceServers) };
+      return res.json({ iceServers: iceCache.servers, turn: true });
+    } catch (e) {
+      console.error('[ice] Cloudflare TURN falhou:', e.message);
+    }
+  }
+  if (TURN_URLS) {
+    return res.json({ iceServers: [...STUN, { urls: TURN_URLS.split(',').map((u) => u.trim()), username: TURN_USERNAME, credential: TURN_CREDENTIAL }], turn: true });
+  }
+  res.json({ iceServers: STUN, turn: false });
+});
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -104,6 +135,7 @@ const BOT_SYSTEM = [
   'Você é o Claude, um assistente dentro de um escritório virtual de uma equipe brasileira que trabalha com agentes de IA, automação e conteúdo.',
   'As pessoas te chamam no chat do escritório escrevendo @claude.',
   'Responda em português do Brasil, direto e curto: no máximo uns 4 parágrafos curtos ou uma lista curta. Sem markdown pesado (o chat mostra texto puro); pode usar quebras de linha e listas com "-".',
+  'Sua resposta também é lida em voz alta para quem perguntou: escreva frases naturais de falar, evite símbolos, tabelas e links longos.',
   'Se precisar de código, mande só o trecho essencial.',
   'Você não vê os computadores, arquivos ou sessões de ninguém, só o que escreverem no chat. Se faltar contexto, peça.',
 ].join('\n');
@@ -126,9 +158,11 @@ function rememberChat(name, text) {
   if (chatHistory.length > 16) chatHistory.shift();
 }
 
-function botSay(text) {
+// asker: quem perguntou. O navegador de quem perguntou (e de quem está na mesma sala) lê a resposta em voz alta.
+function botSay(text, asker) {
   const bot = agents.get(BOT_ID);
   const msg = { id: BOT_ID, name: 'Claude 🤖', zone: bot ? bot.zone : 'estudo', text, at: Date.now(), bot: true };
+  if (asker) { msg.askerId = asker.id; msg.askerName = asker.name; msg.askerRoom = asker.call || asker.zone; }
   rememberChat('Claude', text);
   io.emit('chat', msg);
 }
@@ -147,7 +181,7 @@ async function askClaude(u, question) {
   const last = botLastAsk.get(u.id) || 0;
   const sock = io.sockets.sockets.get(u.id);
   if (now - last < BOT_USER_COOLDOWN_MS) { sock?.emit('toast', 'Calma aí, espera uns segundos pra perguntar de novo ao Claude.'); return; }
-  if (botCalls.length >= BOT_MAX_PER_HOUR) { botSay(`Bati o limite de ${BOT_MAX_PER_HOUR} respostas por hora. Tenta de novo daqui a pouco.`); return; }
+  if (botCalls.length >= BOT_MAX_PER_HOUR) { botSay(`Bati o limite de ${BOT_MAX_PER_HOUR} respostas por hora. Tenta de novo daqui a pouco.`, u); return; }
   if (botBusy >= 3) { sock?.emit('toast', 'O Claude está respondendo outras perguntas, tenta em instantes.'); return; }
   botLastAsk.set(u.id, now);
   botCalls.push(now);
@@ -168,14 +202,14 @@ async function askClaude(u, question) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       console.error('[bot] API erro', r.status, data?.error?.type, data?.error?.message);
-      botSay(r.status === 401 ? 'Minha chave da API está inválida. Quem cuida do servidor precisa conferir a ANTHROPIC_API_KEY.' : 'Não consegui responder agora (erro na API). Tenta de novo daqui a pouco.');
+      botSay(r.status === 401 ? 'Minha chave da API está inválida. Quem cuida do servidor precisa conferir a ANTHROPIC_API_KEY.' : 'Não consegui responder agora (erro na API). Tenta de novo daqui a pouco.', u);
       return;
     }
     const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
-    botSay(text ? `@${u.name} ${text}`.slice(0, 2000) : 'Fiquei sem resposta pra essa, pode reformular?');
+    botSay(text ? `@${u.name} ${text}`.slice(0, 2000) : 'Fiquei sem resposta pra essa, pode reformular?', u);
   } catch (e) {
     console.error('[bot] falha', e.name, e.message);
-    botSay('Demorei demais pra responder e desisti. Tenta de novo?');
+    botSay('Demorei demais pra responder e desisti. Tenta de novo?', u);
   } finally {
     clearTimeout(timer);
     botBusy--;
@@ -236,9 +270,11 @@ function updateZone(u) {
   if (u.call && nz !== u.call) leaveCall(u);
   if (!isMeeting(nz)) u.prev = null;
   io.emit('user-zone', { id: u.id, zone: nz });
+  // Entrou numa sala de reunião: já entra na chamada, com microfone ligado.
+  if (isMeeting(nz)) joinCall(u, nz);
 }
 
-// Chamada só existe quando alguém puxa outra pessoa.
+// Chamada da sala: começa assim que a pessoa entra na sala de reunião (a pé, pelo atalho ou puxada).
 function joinCall(u, room) {
   if (u.call === room) return;
   if (u.call) leaveCall(u);
@@ -342,7 +378,7 @@ io.on('connection', (socket) => {
     if (BOT_KEY && /(^|[^\w@])@claude\b/i.test(t)) {
       const q = t.replace(/@claude\b[,:]?/ig, '').trim();
       if (q) askClaude(u, q);
-      else botSay(`Oi, ${u.name}! Me pergunta algo junto com o @claude, tipo: @claude como faço um hook no Claude Code?`);
+      else botSay(`Oi, ${u.name}! Me pergunta algo junto com o @claude, tipo: @claude como faço um hook no Claude Code?`, u);
     }
   });
 

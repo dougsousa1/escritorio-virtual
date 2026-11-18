@@ -41,6 +41,7 @@
           <span id="callRoom" class="pill">Reunião</span>
           <button id="micBtn" class="btn round" title="Microfone">🎙️</button>
           <button id="camBtn" class="btn round" title="Câmera">📷</button>
+          <button id="screenBtn" class="btn round" title="Compartilhar tela">🖥️</button>
           <button id="leaveBtn" class="btn danger">Sair da reunião</button>
         </div>
       </div>
@@ -79,8 +80,22 @@
       <div id="chatLog"></div>
       <form id="chatForm">
         <input id="chatInput" maxlength="280" placeholder="Mensagem para todos (@claude pra perguntar)" autocomplete="off" />
+        <button type="button" id="askMicBtn" class="chat-icon" title="Perguntar ao Claude por voz">🎤</button>
+        <button type="button" id="voiceBtn" class="chat-icon" title="Voz do Claude">🔊</button>
       </form>
     </aside>
+  </div>
+
+  <div id="leaveAsk" class="overlay hidden">
+    <div class="card invite-card">
+      <div class="ring">🚪</div>
+      <h2>Sair da reunião?</h2>
+      <p id="leaveAskText" class="muted">Se sair da sala, sua câmera e seu áudio desligam.</p>
+      <div class="row">
+        <button id="leaveStayBtn" class="btn">Ficar</button>
+        <button id="leaveGoBtn" class="btn danger">Sair</button>
+      </div>
+    </div>
   </div>
 
   <div id="invite" class="overlay hidden">

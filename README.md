@@ -17,7 +17,9 @@ Abra http://localhost:3000.
 - **Andar:** WASD/setas ou clique no mapa. A barra lateral mostra quem está em cada setor.
 - **Puxar pra reunião:** clique no avatar da pessoa (ou no botão 📞 Puxar na lista). Ela recebe um convite com toque; se aceitar, as duas vão pra uma sala de reunião livre e a chamada de vídeo começa. Se você já está numa sala, a pessoa vem pra sua sala.
 - **Sair da reunião:** volta pra mesa onde você estava.
-- Entrar a pé numa sala de reunião **não** liga câmera/áudio: a chamada só começa quando alguém puxa outra pessoa.
+- Entrou numa sala de reunião (a pé, pelo atalho "Ir para" ou puxado), a chamada liga sozinha com o microfone ligado. Ninguém precisa ligar nada.
+- Ao tentar sair da sala durante a chamada, o escritório pergunta se você quer mesmo sair.
+- Na chamada: 🎙️ microfone, 📷 câmera, 🖥️ compartilhar tela (Chrome ou Edge no computador). Clique num vídeo para ampliar.
 - Quem está em **OFF** não pode ser puxado.
 - Status (Disponível / Ocupado / Ausente), chat geral com balão em cima do avatar, emojis (teclas 1–6).
 
@@ -89,3 +91,10 @@ Para ligar, adicione no Render (Environment):
 - `CLAUDE_MAX_PER_HOUR` (opcional): limite de respostas por hora. Padrão: 60.
 
 Sem `ANTHROPIC_API_KEY` o bot não aparece. O bot vê só as últimas mensagens do chat, nunca arquivos ou sessões de ninguém.
+
+## Câmera que não conecta (TURN)
+
+Só com STUN, a chamada falha quando alguém está atrás de NAT de operadora (4G, alguns provedores): aparece "⚠️ sem conexão" no vídeo. Para resolver, configure um servidor TURN no Render:
+
+- Cloudflare (grátis até 1 TB/mês): crie uma chave em Cloudflare > Realtime > TURN e coloque `CF_TURN_KEY_ID` e `CF_TURN_API_TOKEN`.
+- Ou qualquer TURN: `TURN_URLS` (separadas por vírgula), `TURN_USERNAME`, `TURN_CREDENTIAL`.

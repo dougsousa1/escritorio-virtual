@@ -6,7 +6,13 @@
   const STATUS_LABEL = { disponivel: 'Disponível', ocupado: 'Ocupado', ausente: 'Ausente' };
   const STATUS_COLOR = { disponivel: '#3ccf7a', ocupado: '#ef5b6b', ausente: '#f5c04a' };
   const SPEED = 170;
-  const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  let ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  let iceLoaded = null;
+  // Busca no servidor os servidores STUN/TURN (TURN faz a câmera funcionar atrás de NAT de operadora).
+  function loadIce() {
+    iceLoaded = iceLoaded || fetch('/api/ice').then((r) => r.json()).then((d) => { if (d.iceServers?.length) ICE = d.iceServers; }).catch(() => {});
+    return iceLoaded;
+  }
 
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -135,7 +141,7 @@
     if (id === meId) {
       $('whereAmI').textContent = `📍 ${zoneName(zone)}`;
       if (MAP.zoneById[zone]?.type === 'meeting') {
-        setTimeout(() => { if (u.zone === zone && !u.call) toast('Sala de reunião: puxe alguém para ligar câmera e áudio.'); }, 700);
+        setTimeout(() => { if (u.zone === zone) toast('🎙️ Você entrou na chamada da sala. Microfone ligado.'); }, 700);
       }
       if (zone === 'off') socket.emit('status', 'ausente');
     }
@@ -168,6 +174,83 @@
     while (log.children.length > 100) log.firstChild.remove();
     log.scrollTop = log.scrollHeight;
   });
+  socket.on('chat', (m) => { if (m.bot) speakBot(m); });
+
+  // ---------------------------------------------------------------- Voz do bot @claude
+  // A resposta é lida em voz alta no navegador de quem perguntou e de quem está na mesma sala de reunião.
+  let voiceOn = localStorage.getItem('ev-voice') !== 'off';
+  let ptVoice = null;
+  function pickVoice() {
+    const vs = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    const pt = vs.filter((v) => /^pt(-|_)BR/i.test(v.lang));
+    ptVoice = pt.find((v) => /google|luciana|francisca|thalita|natural|premium|enhanced/i.test(v.name)) || pt[0] || vs.find((v) => /^pt/i.test(v.lang)) || null;
+  }
+  if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+  function updateVoiceBtn() {
+    const b = $('voiceBtn');
+    if (!b) return;
+    b.textContent = voiceOn ? '🔊' : '🔇';
+    b.title = voiceOn ? 'Voz do Claude ligada (clique para desligar)' : 'Voz do Claude desligada (clique para ligar)';
+  }
+  function speakBot(m) {
+    if (!voiceOn || !window.speechSynthesis || !m.askerId) return;
+    const me = users.get(meId);
+    const myRoom = me && (me.call || me.zone);
+    const sameRoom = me && m.askerRoom && myRoom === m.askerRoom && /^r\d/.test(m.askerRoom);
+    if (m.askerId !== meId && !sameRoom) return;
+    const text = m.text
+      .replace(/^@\S+\s*/, '')
+      .replace(/```[\s\S]*?```/g, ' (mandei o código no chat) ')
+      .replace(/https?:\/\/\S+/g, ' (link no chat) ')
+      .replace(/[`*_#>|]/g, '')
+      .replace(/^\s*-\s+/gm, '');
+    speechSynthesis.cancel();
+    // Fala por frases: o Chrome corta falas muito longas.
+    const parts = (text.match(/[^.!?\n]+[.!?]*/g) || [text]).map((p) => p.trim()).filter(Boolean);
+    const bot = agents.get(m.id);
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p);
+      u.lang = 'pt-BR';
+      if (ptVoice) u.voice = ptVoice;
+      u.rate = 1.05;
+      if (bot) u.onstart = () => { bot.bubble = { text: '🗣️ ' + (p.length > 80 ? p.slice(0, 78) + '…' : p), until: performance.now() + 15000 }; };
+      if (bot && i === parts.length - 1) u.onend = () => { bot.bubble = null; };
+      speechSynthesis.speak(u);
+    });
+  }
+
+  // Pergunta por voz: clica no 🎤, fala, e a pergunta vai pro chat como @claude.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null;
+  function startMic() {
+    if (!SR) { toast('Seu navegador não suporta ditado por voz. Use o Chrome.'); return; }
+    if (rec) { rec.stop(); return; }
+    window.speechSynthesis?.cancel();
+    rec = new SR();
+    rec.lang = 'pt-BR';
+    rec.interimResults = true;
+    rec.continuous = false;
+    let finalText = '';
+    $('askMicBtn').classList.add('on');
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) finalText += r[0].transcript; else interim += r[0].transcript;
+      }
+      $('chatInput').value = '@claude ' + (finalText + interim).trim();
+    };
+    rec.onerror = (e) => { if (e.error === 'not-allowed') toast('Libere o microfone para perguntar por voz.'); };
+    rec.onend = () => {
+      $('askMicBtn').classList.remove('on');
+      rec = null;
+      const q = finalText.trim();
+      $('chatInput').value = '';
+      if (q) socket.emit('chat', ('@claude ' + q).slice(0, 280));
+    };
+    rec.start();
+  }
+
   socket.on('emote', ({ id, emoji }) => {
     const u = users.get(id);
     if (u) effects.push({ kind: 'emoji', id, emoji, t0: performance.now(), dx: (Math.random() - 0.5) * 16 });
@@ -318,7 +401,7 @@
       const c = document.createElement('div');
       c.className = 'chip';
       c.textContent = `${z.icon} ${z.name}`;
-      c.onclick = () => socket.emit('go-zone', z.id);
+      c.onclick = () => (call.room && z.id !== call.room ? askLeave(() => socket.emit('go-zone', z.id)) : socket.emit('go-zone', z.id));
       el.appendChild(c);
     }
   }
@@ -331,6 +414,14 @@
     $('chatInput').value = '';
     $('chatInput').blur();
   };
+  $('voiceBtn').onclick = () => {
+    voiceOn = !voiceOn;
+    localStorage.setItem('ev-voice', voiceOn ? 'on' : 'off');
+    if (!voiceOn) window.speechSynthesis?.cancel();
+    updateVoiceBtn();
+  };
+  $('askMicBtn').onclick = startMic;
+  updateVoiceBtn();
   $('emoteBar').onclick = (e) => { const b = e.target.closest('button'); if (b) socket.emit('emote', b.dataset.e); };
 
   function paintMini(el, color, skin) {
@@ -385,7 +476,7 @@
   function showMenu(u, x, y) {
     const m = $('ctxMenu');
     m.innerHTML = `<div class="hdr">${esc(u.name)} <span class="muted" style="font-weight:400">· ${STATUS_LABEL[u.status]}</span></div>
-      ${u.zone === 'off' ? '<div class="muted" style="padding:4px 10px">🌙 Está OFF</div>' : '<button data-act="pull">📞 Puxar pra reunião (liga câmera e áudio)</button>'}
+      ${u.zone === 'off' ? '<div class="muted" style="padding:4px 10px">🌙 Está OFF</div>' : '<button data-act="pull">📞 Puxar pra reunião</button>'}
       <button data-act="walk">📍 Ir até ${esc(u.name)}</button>
       <button data-act="wave">👋 Acenar</button>`;
     m.style.left = Math.min(x, canvas.clientWidth - 200) + 'px';
@@ -421,12 +512,24 @@
       if (d < 3) target = null;
       else { vx = dx / d; vy = dy / d; }
     }
-    const len = Math.hypot(vx, vy);
+    let len = Math.hypot(vx, vy);
+    if (leaveAskOpen) len = 0;
     me.moving = len > 0;
     if (len) {
       const step = Math.min(SPEED * dt, target && !keys.size ? Math.hypot(target.x - me.x, target.y - me.y) : Infinity);
-      me.x = Math.max(8, Math.min(MAP.WIDTH - 8, me.x + (vx / len) * step));
-      me.y = Math.max(8, Math.min(MAP.HEIGHT - 8, me.y + (vy / len) * step));
+      const nx = Math.max(8, Math.min(MAP.WIDTH - 8, me.x + (vx / len) * step));
+      const ny = Math.max(8, Math.min(MAP.HEIGHT - 8, me.y + (vy / len) * step));
+      // Em chamada e prestes a sair da sala: pergunta antes.
+      if (call.room && !leaveOk && MAP.zoneAt(nx, ny)?.id !== call.room) {
+        const tgt = target;
+        keys.clear();
+        target = null;
+        me.moving = false;
+        askLeave(() => { target = tgt; });
+        return;
+      }
+      me.x = nx;
+      me.y = ny;
       me.dir = Math.abs(vx) > Math.abs(vy) ? (vx > 0 ? 'right' : 'left') : vy > 0 ? 'down' : 'up';
     }
     me.rx = me.x;
@@ -1106,10 +1209,41 @@
   function poof(x, y) { effects.push({ kind: 'poof', x, y, t0: performance.now() }); }
 
   // ---------------------------------------------------------------- Chamada (WebRTC mesh)
-  const call = { room: null, local: null, ready: null, peers: new Map(), mic: true, cam: true };
+  const call = { room: null, local: null, ready: null, peers: new Map(), mic: true, cam: true, screen: null };
+
+  // Confirmação ao sair da sala de reunião durante a chamada
+  let leaveOk = false;
+  let leaveAskOpen = false;
+  let leaveAction = null;
+  function askLeave(onYes) {
+    if (leaveAskOpen) return;
+    leaveAskOpen = true;
+    leaveAction = onYes;
+    $('leaveAskText').textContent = `Se sair da ${MAP.zoneById[call.room]?.name || 'sala'}, sua câmera e seu áudio desligam.`;
+    $('leaveAsk').classList.remove('hidden');
+    $('leaveGoBtn').focus();
+  }
+  function closeLeaveAsk(go) {
+    $('leaveAsk').classList.add('hidden');
+    leaveAskOpen = false;
+    const fn = leaveAction;
+    leaveAction = null;
+    if (go) { leaveOk = true; fn?.(); }
+  }
+  $('leaveStayBtn').onclick = () => closeLeaveAsk(false);
+  $('leaveGoBtn').onclick = () => closeLeaveAsk(true);
+  $('leaveAsk').onclick = (e) => { if (e.target === $('leaveAsk')) closeLeaveAsk(false); };
+  window.addEventListener('keydown', (e) => {
+    if (!leaveAskOpen) return;
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') closeLeaveAsk(false);
+    else if (e.key === 'Enter') { e.preventDefault(); closeLeaveAsk(true); }
+  }, true);
 
   socket.on('call-joined', async ({ room, peers }) => {
     call.room = room;
+    leaveOk = false;
+    call.mic = true; // regra: entrou na sala, microfone já liga
     $('callRoom').textContent = `🗣️ ${MAP.zoneById[room].name}`;
     $('callBar').classList.remove('hidden');
     call.ready = getMedia();
@@ -1124,9 +1258,14 @@
     if (!call.room) return;
     await call.ready;
     try {
+      if (data.screen !== undefined) {
+        document.querySelector(`.tile[data-id="${CSS.escape(from)}"]`)?.classList.toggle('screen', !!data.screen);
+        return;
+      }
       if (data.sdp) {
         let p = call.peers.get(from);
         if (data.sdp.type === 'offer') {
+          if (p && ['failed', 'closed'].includes(p.pc.connectionState)) { closePeer(from); p = null; }
           if (!p) p = makePeer(from);
           await p.pc.setRemoteDescription(data.sdp);
           await p.pc.setLocalDescription(await p.pc.createAnswer());
@@ -1148,6 +1287,7 @@
 
   async function getMedia() {
     if (call.local) return call.local;
+    await loadIce();
     let stream = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: { width: 320, height: 240 } });
@@ -1155,8 +1295,10 @@
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         toast('Câmera indisponível — entrando só com áudio.');
-      } catch {
-        toast('Sem microfone/câmera — você vai só ouvir e ver. (Precisa de HTTPS ou localhost.)');
+      } catch (err) {
+        toast(err?.name === 'NotAllowedError'
+          ? 'Câmera e microfone bloqueados. Clique no cadeado ao lado do endereço e permita.'
+          : 'Sem microfone/câmera: você vai só ouvir e ver.');
       }
     }
     call.local = stream;
@@ -1173,17 +1315,29 @@
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const p = { pc, queue: [], stream: new MediaStream() };
     call.peers.set(id, p);
-    if (call.local) {
-      call.local.getTracks().forEach((tr) => pc.addTrack(tr, call.local));
-    }
-    const kinds = new Set(call.local ? call.local.getTracks().map((tr) => tr.kind) : []);
-    for (const k of ['audio', 'video']) if (!kinds.has(k)) pc.addTransceiver(k, { direction: 'recvonly' });
+    const screenTrack = call.screen?.getVideoTracks()[0];
+    const outStream = call.local || new MediaStream();
+    const outTracks = call.local ? call.local.getTracks().filter((tr) => !(screenTrack && tr.kind === 'video')) : [];
+    if (screenTrack) outTracks.push(screenTrack);
+    outTracks.forEach((tr) => pc.addTrack(tr, outStream));
+    const kinds = new Set(outTracks.map((tr) => tr.kind));
+    // Sem câmera: ainda abre o canal de vídeo para poder compartilhar a tela depois.
+    for (const k of ['audio', 'video']) if (!kinds.has(k)) pc.addTransceiver(k, { direction: k === 'video' ? 'sendrecv' : 'recvonly' });
+    if (screenTrack) setTimeout(() => socket.emit('signal', { to: id, data: { screen: true } }), 1500);
     pc.onicecandidate = (e) => { if (e.candidate) socket.emit('signal', { to: id, data: { candidate: e.candidate } }); };
     pc.ontrack = (e) => {
       if (!p.stream.getTracks().includes(e.track)) p.stream.addTrack(e.track);
       tile(id, p.stream, users.get(id)?.name || '...', false);
     };
-    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') toast(`Conexão com ${users.get(id)?.name} falhou (rede bloqueando?).`); };
+    pc.onconnectionstatechange = () => {
+      const st = pc.connectionState;
+      const net = document.querySelector(`.tile[data-id="${CSS.escape(id)}"] .net`);
+      if (net) net.textContent = st === 'connected' ? '' : st === 'failed' ? '⚠️ sem conexão' : st === 'disconnected' ? '… reconectando' : '… conectando';
+      if (st === 'failed') {
+        toast(`Vídeo com ${users.get(id)?.name} não conectou: a rede de alguém está bloqueando. Tentando de novo...`);
+        if (socket.id < id) setTimeout(() => { if (call.room && call.peers.get(id)?.pc === pc) { closePeer(id); offerTo(id); } }, 1500);
+      }
+    };
     tile(id, null, users.get(id)?.name || '...', false);
     return p;
   }
@@ -1202,6 +1356,7 @@
   }
 
   function endCall() {
+    stopScreen(true);
     for (const id of [...call.peers.keys()]) closePeer(id);
     call.local?.getTracks().forEach((tr) => tr.stop());
     call.local = null;
@@ -1219,7 +1374,8 @@
       el.dataset.id = id;
       const u = users.get(isMe ? meId : id);
       el.innerHTML = `<div class="noCam" style="background:${u?.color || '#333'}">${esc((u?.name || '?')[0].toUpperCase())}</div>
-        <video autoplay playsinline ${isMe ? 'muted' : ''}></video><div class="label"></div>`;
+        <video autoplay playsinline ${isMe ? 'muted' : ''}></video><div class="label"></div><div class="net">${isMe ? '' : '… conectando'}</div>`;
+      el.onclick = () => el.classList.toggle('big');
       $('videos').appendChild(el);
     }
     el.querySelector('.label').textContent = name;
@@ -1258,7 +1414,63 @@
   function updateButtons() {
     $('micBtn').classList.toggle('off', !call.mic);
     $('camBtn').classList.toggle('off', !call.cam);
+    $('screenBtn').classList.toggle('on', !!call.screen);
   }
+
+  // ---------------------------------------------------------------- Compartilhar tela
+  function videoSender(pc) {
+    const t = pc.getTransceivers().find((x) => x.receiver.track?.kind === 'video' && !x.stopped);
+    return t || null;
+  }
+  async function sendVideo(id, p, track) {
+    const t = videoSender(p.pc);
+    if (!t) return;
+    await t.sender.replaceTrack(track).catch(() => {});
+    // Quem entrou sem câmera recebeu o canal de vídeo "só receber": renegocia para poder enviar.
+    if (track && !/send/.test(t.currentDirection || t.direction)) {
+      t.direction = 'sendrecv';
+      await p.pc.setLocalDescription(await p.pc.createOffer());
+      socket.emit('signal', { to: id, data: { sdp: p.pc.localDescription } });
+    }
+  }
+  async function toggleScreen() {
+    if (call.screen) return stopScreen();
+    if (!navigator.mediaDevices?.getDisplayMedia) { toast('Seu navegador não compartilha tela (no celular não dá). Use Chrome ou Edge no computador.'); return; }
+    let s;
+    try { s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false }); } catch { return; }
+    if (!call.room) { s.getTracks().forEach((tr) => tr.stop()); return; }
+    call.screen = s;
+    const tr = s.getVideoTracks()[0];
+    tr.contentHint = 'detail';
+    tr.onended = () => stopScreen();
+    for (const [id, p] of call.peers) {
+      await sendVideo(id, p, tr);
+      socket.emit('signal', { to: id, data: { screen: true } });
+    }
+    const me = document.querySelector('.tile.me');
+    if (me) { me.classList.add('screen'); const v = me.querySelector('video'); v.srcObject = s; v.style.visibility = 'visible'; }
+    updateButtons();
+    toast('Compartilhando sua tela. Clique em 🖥️ de novo para parar.');
+  }
+  function stopScreen(silent) {
+    if (!call.screen) return;
+    call.screen.getTracks().forEach((tr) => tr.stop());
+    call.screen = null;
+    const cam = call.local?.getVideoTracks()[0] || null;
+    for (const [id, p] of call.peers) {
+      videoSender(p.pc)?.sender.replaceTrack(cam).catch(() => {});
+      socket.emit('signal', { to: id, data: { screen: false } });
+    }
+    const me = document.querySelector('.tile.me');
+    if (me && !silent) {
+      me.classList.remove('screen');
+      const v = me.querySelector('video');
+      v.srcObject = call.local;
+      v.style.visibility = call.cam && cam ? 'visible' : 'hidden';
+    }
+    updateButtons();
+  }
+  $('screenBtn').onclick = toggleScreen;
   $('micBtn').onclick = () => {
     call.mic = !call.mic;
     call.local?.getAudioTracks().forEach((tr) => (tr.enabled = call.mic));
@@ -1268,7 +1480,7 @@
     call.cam = !call.cam;
     call.local?.getVideoTracks().forEach((tr) => (tr.enabled = call.cam));
     const me = document.querySelector('.tile.me video');
-    if (me) me.style.visibility = call.cam && call.local?.getVideoTracks().length ? 'visible' : 'hidden';
+    if (me && !call.screen) me.style.visibility = call.cam && call.local?.getVideoTracks().length ? 'visible' : 'hidden';
     updateButtons();
   };
   $('leaveBtn').onclick = () => socket.emit('leave-meeting');

@@ -133,3 +133,17 @@ input:focus, select:focus { border-color: var(--accent); }
 
 #chatLog .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
 #chatLog .msg.bot { background: rgba(217, 119, 87, 0.14); border-left: 3px solid #d97757; border-radius: 6px; padding: 4px 6px; }
+#chatForm { display: flex; gap: 6px; align-items: center; }
+#chatForm #chatInput { flex: 1; min-width: 0; }
+.chat-icon { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); cursor: pointer; font-size: 16px; padding: 0; }
+.chat-icon:hover { background: rgba(255,255,255,0.12); }
+#askMicBtn.on { background: #d97757; border-color: #d97757; animation: micPulse 1s ease-in-out infinite; }
+@keyframes micPulse { 50% { box-shadow: 0 0 0 6px rgba(217,119,87,0.25); } }
+#leaveAsk.overlay { background: rgba(10,12,20,.55); backdrop-filter: blur(3px); }
+.btn.round.on { background: var(--ok); border-color: var(--ok); }
+.tile { cursor: pointer; }
+.tile.screen video, .tile.big video { object-fit: contain; transform: none; background: #000; }
+.tile.screen { width: min(640px, 70vw); height: min(380px, 42vh); }
+.tile.big { position: fixed; inset: 4vh 4vw; width: auto; height: auto; z-index: 60; }
+.tile .net { position: absolute; top: 6px; right: 8px; font-size: 11px; background: rgba(0,0,0,.6); padding: 2px 7px; border-radius: 999px; }
+.tile .net:empty { display: none; }
