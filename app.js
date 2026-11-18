@@ -1259,7 +1259,10 @@
     await call.ready;
     try {
       if (data.screen !== undefined) {
-        document.querySelector(`.tile[data-id="${CSS.escape(from)}"]`)?.classList.toggle('screen', !!data.screen);
+        const t = document.querySelector(`.tile[data-id="${CSS.escape(from)}"]`);
+        t?.classList.toggle('screen', !!data.screen);
+        const tv = t?.querySelector('video');
+        if (tv) playMedia(tv);
         return;
       }
       if (data.sdp) {
@@ -1374,18 +1377,54 @@
       el.dataset.id = id;
       const u = users.get(isMe ? meId : id);
       el.innerHTML = `<div class="noCam" style="background:${u?.color || '#333'}">${esc((u?.name || '?')[0].toUpperCase())}</div>
-        <video autoplay playsinline ${isMe ? 'muted' : ''}></video><div class="label"></div><div class="net">${isMe ? '' : '… conectando'}</div>`;
+        <video autoplay playsinline muted></video>${isMe ? '' : '<audio autoplay></audio>'}<div class="label"></div><div class="net">${isMe ? '' : '… conectando'}</div>`;
       el.onclick = () => el.classList.toggle('big');
       $('videos').appendChild(el);
     }
     el.querySelector('.label').textContent = name;
     const v = el.querySelector('video');
     if (stream && v.srcObject !== stream) v.srcObject = stream;
-    const hasVideo = stream && stream.getVideoTracks().some((tr) => tr.readyState === 'live');
-    v.style.visibility = hasVideo ? 'visible' : 'hidden';
-    if (stream && !isMe) v.play().catch(() => {});
+    if (isMe) {
+      const hasVideo = stream && stream.getVideoTracks().some((tr) => tr.readyState === 'live');
+      v.style.visibility = hasVideo ? 'visible' : 'hidden';
+    } else if (stream) {
+      // Vídeo sempre mudo (o navegador sempre deixa tocar); o som vai num <audio> separado.
+      const a = el.querySelector('audio');
+      if (a.srcObject !== stream) a.srcObject = stream;
+      playMedia(v);
+      playMedia(a);
+      const show = () => {
+        const on = stream.getVideoTracks().some((tr) => tr.readyState === 'live' && !tr.muted);
+        v.style.visibility = on ? 'visible' : 'hidden';
+      };
+      for (const tr of stream.getVideoTracks()) {
+        if (tr._watched) continue;
+        tr._watched = true;
+        tr.addEventListener('mute', show);
+        tr.addEventListener('unmute', () => { show(); playMedia(v); });
+        tr.addEventListener('ended', show);
+      }
+      v.onplaying = show;
+      show();
+    }
     if (stream) watchSpeaking(el, stream, isMe);
   }
+
+  // Se o navegador bloquear o som até alguém clicar, tenta de novo no próximo clique ou tecla.
+  const blockedMedia = new Set();
+  function playMedia(m) {
+    const r = m.play();
+    if (r) r.catch(() => {
+      if (!m.isConnected) return;
+      if (!blockedMedia.size) toast('Clique em qualquer lugar para ouvir a chamada.');
+      blockedMedia.add(m);
+    });
+  }
+  const retryMedia = () => {
+    for (const m of [...blockedMedia]) { blockedMedia.delete(m); if (m.isConnected) playMedia(m); }
+  };
+  addEventListener('pointerdown', retryMedia, true);
+  addEventListener('keydown', retryMedia, true);
 
   // Borda verde em quem está falando
   let audioCtx = null;
