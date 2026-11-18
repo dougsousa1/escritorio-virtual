@@ -77,3 +77,15 @@ No servidor, a variável `AGENT_KEY` define a chave; sem ela, qualquer um pode c
 - `office-hook.js` — hook do Claude Code que manda o estado da sessão para o escritório.
 
 O estado fica em memória: reiniciar o servidor zera quem está online (não há banco de dados nem login).
+
+## Bot @claude no chat
+
+Quem escrever `@claude` no chat do escritório recebe uma resposta do Claude ali mesmo. O robô "Claude" fica sentado no Estudo e mostra "pensando" enquanto responde.
+
+Para ligar, adicione no Render (Environment):
+
+- `ANTHROPIC_API_KEY`: chave da API da Anthropic (console.anthropic.com). Cada resposta é cobrada nessa conta.
+- `CLAUDE_MODEL` (opcional): modelo usado. Padrão: `claude-sonnet-5-5`.
+- `CLAUDE_MAX_PER_HOUR` (opcional): limite de respostas por hora. Padrão: 60.
+
+Sem `ANTHROPIC_API_KEY` o bot não aparece. O bot vê só as últimas mensagens do chat, nunca arquivos ou sessões de ninguém.

@@ -62,6 +62,7 @@ app.post('/api/agent', (req, res) => {
   const b = req.body || {};
   const id = 'ag-' + clean(b.id, 64).replace(/[^\w-]/g, '');
   if (id === 'ag-') return res.status(400).json({ ok: false });
+  if (agents.get(id)?.permanent) return res.status(403).json({ ok: false });
   const event = String(b.event || '');
 
   if (event === 'SessionEnd') {
@@ -92,9 +93,100 @@ app.post('/api/agent', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------- Bot @claude (responde dúvidas no chat)
+// Liga só se ANTHROPIC_API_KEY estiver definida no servidor (Render > Environment).
+const BOT_KEY = process.env.ANTHROPIC_API_KEY || '';
+const BOT_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
+const BOT_ID = 'ag-claude-bot';
+const BOT_MAX_PER_HOUR = Number(process.env.CLAUDE_MAX_PER_HOUR) || 60;
+const BOT_USER_COOLDOWN_MS = 8000;
+const BOT_SYSTEM = [
+  'Você é o Claude, um assistente dentro de um escritório virtual de uma equipe brasileira que trabalha com agentes de IA, automação e conteúdo.',
+  'As pessoas te chamam no chat do escritório escrevendo @claude.',
+  'Responda em português do Brasil, direto e curto: no máximo uns 4 parágrafos curtos ou uma lista curta. Sem markdown pesado (o chat mostra texto puro); pode usar quebras de linha e listas com "-".',
+  'Se precisar de código, mande só o trecho essencial.',
+  'Você não vê os computadores, arquivos ou sessões de ninguém, só o que escreverem no chat. Se faltar contexto, peça.',
+].join('\n');
+const chatHistory = []; // últimas mensagens do chat, para o bot ter contexto
+const botLastAsk = new Map(); // userId -> horário da última pergunta
+let botCalls = [];
+let botBusy = 0;
+
+if (BOT_KEY) {
+  const spot = freeSpot('estudo', BOT_ID);
+  agents.set(BOT_ID, {
+    id: BOT_ID, name: 'Claude', owner: 'chame com @claude', color: '#d97757',
+    state: 'idle', tool: null, x: spot.x, y: spot.y, dir: spot.dir || 'down', zone: 'estudo',
+    seen: Infinity, permanent: true,
+  });
+}
+
+function rememberChat(name, text) {
+  chatHistory.push({ name, text });
+  if (chatHistory.length > 16) chatHistory.shift();
+}
+
+function botSay(text) {
+  const bot = agents.get(BOT_ID);
+  const msg = { id: BOT_ID, name: 'Claude 🤖', zone: bot ? bot.zone : 'estudo', text, at: Date.now(), bot: true };
+  rememberChat('Claude', text);
+  io.emit('chat', msg);
+}
+
+function botState(state, tool) {
+  const bot = agents.get(BOT_ID);
+  if (!bot) return;
+  bot.state = state;
+  bot.tool = tool || null;
+  io.emit('agent-update', { ...publicAgent(bot), event: state === 'working' ? 'UserPromptSubmit' : 'BotIdle' });
+}
+
+async function askClaude(u, question) {
+  const now = Date.now();
+  botCalls = botCalls.filter((t) => now - t < 3600 * 1000);
+  const last = botLastAsk.get(u.id) || 0;
+  const sock = io.sockets.sockets.get(u.id);
+  if (now - last < BOT_USER_COOLDOWN_MS) { sock?.emit('toast', 'Calma aí, espera uns segundos pra perguntar de novo ao Claude.'); return; }
+  if (botCalls.length >= BOT_MAX_PER_HOUR) { botSay(`Bati o limite de ${BOT_MAX_PER_HOUR} respostas por hora. Tenta de novo daqui a pouco.`); return; }
+  if (botBusy >= 3) { sock?.emit('toast', 'O Claude está respondendo outras perguntas, tenta em instantes.'); return; }
+  botLastAsk.set(u.id, now);
+  botCalls.push(now);
+  botBusy++;
+  botState('working', 'pensando');
+
+  const context = chatHistory.slice(0, -1).map((m) => `${m.name}: ${m.text}`).join('\n');
+  const content = (context ? `Conversa recente no chat do escritório:\n${context}\n\n` : '') + `${u.name} perguntou: ${question}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': BOT_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: BOT_MODEL, max_tokens: 700, system: BOT_SYSTEM, messages: [{ role: 'user', content }] }),
+      signal: ctrl.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      console.error('[bot] API erro', r.status, data?.error?.type, data?.error?.message);
+      botSay(r.status === 401 ? 'Minha chave da API está inválida. Quem cuida do servidor precisa conferir a ANTHROPIC_API_KEY.' : 'Não consegui responder agora (erro na API). Tenta de novo daqui a pouco.');
+      return;
+    }
+    const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+    botSay(text ? `@${u.name} ${text}`.slice(0, 2000) : 'Fiquei sem resposta pra essa, pode reformular?');
+  } catch (e) {
+    console.error('[bot] falha', e.name, e.message);
+    botSay('Demorei demais pra responder e desisti. Tenta de novo?');
+  } finally {
+    clearTimeout(timer);
+    botBusy--;
+    if (!botBusy) botState('idle');
+  }
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const [id, a] of agents) {
+    if (a.permanent) continue;
     if (now - a.seen > AGENT_STALE_MS) { agents.delete(id); io.emit('agent-left', { id }); }
   }
 }, 60 * 1000);
@@ -246,6 +338,12 @@ io.on('connection', (socket) => {
     const t = clean(text, 280);
     if (!u || !t) return;
     io.emit('chat', { id: u.id, name: u.name, zone: u.zone, text: t, at: Date.now() });
+    rememberChat(u.name, t);
+    if (BOT_KEY && /(^|[^\w@])@claude\b/i.test(t)) {
+      const q = t.replace(/@claude\b[,:]?/ig, '').trim();
+      if (q) askClaude(u, q);
+      else botSay(`Oi, ${u.name}! Me pergunta algo junto com o @claude, tipo: @claude como faço um hook no Claude Code?`);
+    }
   });
 
   socket.on('emote', (emoji) => {

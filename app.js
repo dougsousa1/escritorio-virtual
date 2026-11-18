@@ -158,11 +158,11 @@
     if (id === meId) { myTp = tp; target = null; }
   });
   socket.on('chat', (m) => {
-    const u = users.get(m.id);
-    if (u) u.bubble = { text: m.text, until: performance.now() + 6000 };
+    const u = users.get(m.id) || agents.get(m.id);
+    if (u) u.bubble = { text: m.text.length > 90 ? m.text.slice(0, 88) + '…' : m.text, until: performance.now() + (m.bot ? 9000 : 6000) };
     const log = $('chatLog');
     const div = document.createElement('div');
-    div.className = 'msg';
+    div.className = m.bot ? 'msg bot' : 'msg';
     div.innerHTML = `<span class="z">${esc(zoneName(m.zone))}</span><br><b>${esc(m.name)}:</b> ${esc(m.text)}`;
     log.appendChild(div);
     while (log.children.length > 100) log.firstChild.remove();

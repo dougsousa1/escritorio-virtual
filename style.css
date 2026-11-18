@@ -130,3 +130,6 @@ input:focus, select:focus { border-color: var(--accent); }
 .person .dot.bot { border-radius: 7px; }
 .st-ag-working { background: var(--ok); } .st-ag-waiting { background: var(--warn); } .st-ag-idle { background: #8b93a8; }
 .person.ag-waiting { box-shadow: inset 3px 0 0 var(--warn); }
+
+#chatLog .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+#chatLog .msg.bot { background: rgba(217, 119, 87, 0.14); border-left: 3px solid #d97757; border-radius: 6px; padding: 4px 6px; }
