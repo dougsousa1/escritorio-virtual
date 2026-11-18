@@ -1335,7 +1335,8 @@
     pc.onconnectionstatechange = () => {
       const st = pc.connectionState;
       const net = document.querySelector(`.tile[data-id="${CSS.escape(id)}"] .net`);
-      if (net) net.textContent = st === 'connected' ? '' : st === 'failed' ? '⚠️ sem conexão' : st === 'disconnected' ? '… reconectando' : '… conectando';
+      if (net) net.textContent = st === 'connected' ? '' : st === 'failed' ? '⚠️ sem conexão (rede bloqueando)' : st === 'disconnected' ? '… reconectando' : '… conectando';
+      if (st === 'connected') watchStats(id, pc);
       if (st === 'failed') {
         toast(`Vídeo com ${users.get(id)?.name} não conectou: a rede de alguém está bloqueando. Tentando de novo...`);
         if (socket.id < id) setTimeout(() => { if (call.room && call.peers.get(id)?.pc === pc) { closePeer(id); offerTo(id); } }, 1500);
@@ -1343,6 +1344,30 @@
     };
     tile(id, null, users.get(id)?.name || '...', false);
     return p;
+  }
+
+  // Diagnóstico: conectou mas o vídeo não chega? Mostra no quadrinho.
+  function watchStats(id, pc) {
+    if (pc._stats) return;
+    pc._stats = true;
+    let last = -1;
+    const tick = async () => {
+      if (pc.connectionState === 'closed' || call.peers.get(id)?.pc !== pc) return;
+      const net = document.querySelector(`.tile[data-id="${CSS.escape(id)}"] .net`);
+      try {
+        const rep = await pc.getStats();
+        let bytes = 0, frames = 0;
+        rep.forEach((r) => {
+          if (r.type === 'inbound-rtp' && r.kind === 'video') { bytes += r.bytesReceived || 0; frames += r.framesDecoded || 0; }
+        });
+        if (net && pc.connectionState === 'connected') {
+          net.textContent = bytes > last && frames > 0 ? '' : bytes > last ? '… vídeo chegando' : 'conectado, sem vídeo da pessoa';
+        }
+        last = bytes;
+      } catch { /* sem estatísticas */ }
+      setTimeout(tick, 2500);
+    };
+    setTimeout(tick, 2500);
   }
 
   async function offerTo(id) {
